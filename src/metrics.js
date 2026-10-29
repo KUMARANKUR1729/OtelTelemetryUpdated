@@ -1,3 +1,6 @@
+// Quarantined legacy entry point. See src/telemetry.js for consent-controlled initialization.
+throw new Error('Legacy OpenTelemetry modules are disabled; use src/telemetry.js and src/sdk/index.js');
+
 // Browser metrics: MeterProvider -> OTLP/HTTP -> Collector -> Prometheus.
 import { metrics } from '@opentelemetry/api';
 import { MeterProvider, PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';

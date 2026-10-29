@@ -5,7 +5,11 @@ import { resolveConfig, readConsent, writeConsent } from './config.js';
 
 const state = { status: 'off', reason: 'not initialised', config: null, stop: null };
 const listeners = new Set();
-let queue = Promise.resolve(); // start/stop calls run one at a time
+let queue = Promise.resolve(); // lifecycle work runs one at a time
+let generation = 0;
+let sdkStarter = null;
+
+export function _setSdkStarterForTests(starter) { sdkStarter = starter; }
 
 function setStatus(status, reason = '') {
   state.status = status; // 'off' | 'waiting-consent' | 'starting' | 'on'
@@ -33,51 +37,78 @@ export function onTelemetryStatus(fn) {
 
 /** Call once at app start. Safe to call with no arguments: telemetry then stays off unless .env opts in. */
 export function initTelemetry(options = {}) {
+  generation++;
+  const requestedGeneration = generation;
   return serialise(async () => {
-    await stopNow(); // allows re-init with new options
+    await stopNow();
+    if (requestedGeneration !== generation) return;
     const config = resolveConfig(options);
     state.config = config;
     if (!config.enabled) return setStatus('off', 'disabled by configuration (opt-in: set VITE_OTEL_ENABLED=true or pass { enabled: true })');
     if (!SIGNALS_ON(config)) return setStatus('off', 'every signal is switched off');
     if (config.requireConsent && readConsent() !== 'granted') return setStatus('waiting-consent', 'waiting for user consent');
-    await startNow();
+    await startNow(requestedGeneration);
   });
 }
 
 /** User said yes. Starts telemetry if the config allows it (and remembers the choice). */
 export function grantConsent() {
   writeConsent('granted');
+  if (state.status === 'starting' || state.status === 'on') {
+    setStatus(state.status, state.reason);
+    return Promise.resolve(queue);
+  }
+  generation++;
+  const grantedGeneration = generation;
+  setStatus('starting', 'consent granted');
   return serialise(async () => {
-    if (state.config?.enabled && SIGNALS_ON(state.config) && state.status !== 'on') await startNow();
-    else setStatus(state.status, state.reason); // notify listeners about the consent change
+    if (grantedGeneration !== generation || readConsent() !== 'granted') return;
+    if (state.config?.enabled && SIGNALS_ON(state.config) && state.status !== 'on') await startNow(grantedGeneration);
+    else setStatus(state.status, state.reason);
   });
 }
 
-/** User said no / withdrew consent. Flushes nothing more than already queued, stops everything, forgets nothing else. */
+/** User said no / withdrew consent. Collection is inactive synchronously; cleanup runs separately. */
 export function revokeConsent() {
   writeConsent('denied');
+  generation++;
+  const stop = state.stop;
+  state.stop = null;
+  setStatus(state.config?.requireConsent ? 'waiting-consent' : 'off', 'consent withdrawn');
   return serialise(async () => {
-    await stopNow();
-    if (state.config?.enabled) setStatus(state.config.requireConsent ? 'waiting-consent' : 'off', 'consent withdrawn');
+    if (stop) await stop();
   });
 }
 
 /** Developer-side kill switch (e.g. for tests or a settings page). Does not change stored consent. */
 export function stopTelemetry() {
-  return serialise(async () => { await stopNow(); setStatus('off', 'stopped'); });
+  generation++;
+  const stop = state.stop;
+  state.stop = null;
+  setStatus('off', 'stopped');
+  return serialise(async () => { if (stop) await stop(); });
 }
 
 const SIGNALS_ON = (c) => Object.values(c.signals).some(Boolean);
 
-async function startNow() {
+async function startNow(requestedGeneration) {
+  if (requestedGeneration !== generation || readConsent() !== 'granted' && state.config.requireConsent) return;
   setStatus('starting');
+  const isCurrent = () => requestedGeneration === generation &&
+    (!state.config.requireConsent || readConsent() === 'granted');
   try {
-    const { startSdk } = await import('./sdk/index.js');
-    state.stop = await startSdk(state.config);
+    const starter = sdkStarter ?? (await import('./sdk/index.js')).startSdk;
+    if (!isCurrent()) return;
+    const stop = await starter(state.config, isCurrent);
+    if (!isCurrent()) {
+      await stop();
+      return;
+    }
+    state.stop = stop;
     setStatus('on');
   } catch (e) {
     state.stop = null;
-    setStatus('off', `failed to start: ${e?.message ?? e}`);
+    if (isCurrent()) setStatus('off', `failed to start: ${e?.message ?? e}`);
   }
 }
 async function stopNow() {

@@ -2,14 +2,15 @@
 import { trace, SpanStatusCode } from '@opentelemetry/api';
 import { errorCount, recordVital, logError } from '../instruments.js';
 
-export async function startBrowserEvents(config) {
+export async function startBrowserEvents(config, isCurrent = () => true) {
   let active = true;
   const cleanups = [];
+  const stopBrowserListeners = async () => { active = false; cleanups.forEach((fn) => fn()); cleanups.length = 0; };
 
   if (config.features.errors) {
     const errTracer = trace.getTracer('browser-errors');
     const reportError = (name, err) => {
-      if (!active) return;
+      if (!active || !isCurrent()) return;
       const e = err instanceof Error ? err : new Error(String(err));
       const span = errTracer.startSpan(name);
       span.recordException(e);
@@ -30,9 +31,13 @@ export async function startBrowserEvents(config) {
 
   if (config.features.webVitals) {
     const { onLCP, onCLS, onINP, onFCP, onTTFB } = await import('web-vitals');
+    if (!isCurrent()) {
+      await stopBrowserListeners();
+      return { stop: async () => {} };
+    }
     const vitalsTracer = trace.getTracer('web-vitals');
     const reportVital = (metric) => {
-      if (!active) return; // web-vitals has no unsubscribe: ignore late callbacks after stop()
+      if (!active || !isCurrent()) return; // web-vitals has no unsubscribe: ignore late callbacks after stop()
       const span = vitalsTracer.startSpan(`web-vital.${metric.name}`);
       span.setAttribute('web_vital.name', metric.name);
       span.setAttribute('web_vital.value', metric.value);
@@ -44,5 +49,5 @@ export async function startBrowserEvents(config) {
     [onLCP, onCLS, onINP, onFCP, onTTFB].forEach((fn) => fn(reportVital));
   }
 
-  return { stop: async () => { active = false; cleanups.forEach((fn) => fn()); } };
+  return { stop: stopBrowserListeners };
 }

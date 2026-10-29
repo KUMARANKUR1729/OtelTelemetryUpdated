@@ -2,7 +2,7 @@
 // Order of precedence (last wins): built-in defaults < .env (VITE_OTEL_*) < options passed to initTelemetry().
 // This file imports NO OpenTelemetry packages, so it is free to load when telemetry is disabled.
 
-const env = import.meta.env;
+const env = import.meta.env ?? {};
 
 export const SIGNALS = ['traces', 'metrics', 'logs'];
 export const FEATURES = ['documentLoad', 'userInteraction', 'fetch', 'xhr', 'webVitals', 'errors', 'consoleCapture'];

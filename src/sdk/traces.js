@@ -17,8 +17,9 @@ const URL_ATTRS = ['http.url', 'url.full', 'http.target', 'url.query', 'url.path
 const stripQuery = (v) => (typeof v === 'string' ? v.replace(/[?#].*$/, '') : v);
 
 class RedactingExporter {
-  constructor(inner) { this.inner = inner; }
+  constructor(inner, gate) { this.inner = inner; this.gate = gate; }
   export(spans, resultCallback) {
+    if (!this.gate.active) { resultCallback({ code: 0 }); return; }
     for (const span of spans) {
       for (const key of URL_ATTRS) {
         if (key in span.attributes) span.attributes[key] = stripQuery(span.attributes[key]);
@@ -45,10 +46,11 @@ class SessionSpanProcessor {
 }
 
 export function startTraces(config, resource) {
+  const exportGate = { active: true };
   const processors = [new SessionSpanProcessor(getSessionId())];
   if (config.signals.metrics) processors.push(new HttpMetricsSpanProcessor()); // needs the metrics signal too
   processors.push(
-    new BatchSpanProcessor(new RedactingExporter(new OTLPTraceExporter({ url: `${config.otlpBase}/v1/traces` })), {
+    new BatchSpanProcessor(new RedactingExporter(new OTLPTraceExporter({ url: `${config.otlpBase}/v1/traces` }), exportGate), {
       maxQueueSize: 100, maxExportBatchSize: 30, scheduledDelayMillis: 2000,
     }),
   );
@@ -83,6 +85,7 @@ export function startTraces(config, resource) {
   return {
     flush: () => provider.forceFlush(),
     stop: async () => {
+      exportGate.active = false;
       instrumentations.forEach((i) => i.disable());
       await provider.shutdown();
       trace.disable(); context.disable(); propagation.disable(); // allow a clean re-start later

@@ -17,10 +17,21 @@ class SessionAndRedactProcessor {
   shutdown() { return Promise.resolve(); }
 }
 
+class GatedExporter {
+  constructor(inner, gate) { this.inner = inner; this.gate = gate; }
+  export(records, resultCallback) {
+    if (!this.gate.active) { resultCallback({ code: 0 }); return; }
+    this.inner.export(records, resultCallback);
+  }
+  forceFlush() { return this.gate.active ? (this.inner.forceFlush?.() ?? Promise.resolve()) : Promise.resolve(); }
+  shutdown() { return this.inner.shutdown(); }
+}
+
 export function startLogs(config, resource) {
+  const exportGate = { active: true };
   const processors = [
     new SessionAndRedactProcessor(getSessionId()), // must run before the exporting processor
-    new BatchLogRecordProcessor(new OTLPLogExporter({ url: `${config.otlpBase}/v1/logs` }), {
+    new BatchLogRecordProcessor(new GatedExporter(new OTLPLogExporter({ url: `${config.otlpBase}/v1/logs` }), exportGate), {
       maxQueueSize: 200, maxExportBatchSize: 50, scheduledDelayMillis: 2000,
     }),
   ];
@@ -29,7 +40,7 @@ export function startLogs(config, resource) {
   logs.setGlobalLoggerProvider(provider);
   return {
     flush: () => provider.forceFlush(),
-    stop: async () => { await provider.shutdown(); logs.disable(); },
+    stop: async () => { exportGate.active = false; await provider.shutdown(); logs.disable(); },
   };
 }
 

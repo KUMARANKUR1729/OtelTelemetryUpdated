@@ -2,7 +2,7 @@ services:
   jaeger:                    # traces UI  http://localhost:16686
     image: jaegertracing/all-in-one:latest
     ports:
-      - "16686:16686"
+      - "127.0.0.1:16686:16686"
 
   collector:                 # receives traces, metrics and logs from the browser/backend on :4318
     image: otel/opentelemetry-collector-contrib:0.164.0
@@ -10,8 +10,8 @@ services:
     volumes:
       - ./otel-collector.yaml:/etc/otel.yaml
     ports:
-      - "4318:4318"          # OTLP/HTTP (browser sends here)
-      - "8889:8889"          # metrics as Prometheus text (open http://localhost:8889/metrics)
+      - "127.0.0.1:4318:4318" # OTLP/HTTP (browser sends here)
+      - "127.0.0.1:8889:8889" # Prometheus text (open http://localhost:8889/metrics)
     depends_on:
       - jaeger
       - loki
@@ -21,25 +21,26 @@ services:
     volumes:
       - ./infra/prometheus.yaml:/etc/prometheus/prometheus.yml
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     depends_on:
       - collector
 
   loki:                      # log store (no UI of its own, query it from Grafana)
     image: grafana/loki:3.7.9
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
 
   grafana:                   # logs + metrics + traces in one UI  http://localhost:3001
     image: grafana/grafana:13.2.4
-    environment:             # POC ONLY: no login. Never expose this.
+    environment:             # Local demo uses read-only anonymous access; production must authenticate.
       GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
-      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_DISABLE_LOGIN_FORM: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - ./infra/grafana/datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
     ports:
-      - "3001:3000"          # 3001 because the demo backend uses 3000
+      - "127.0.0.1:3001:3000" # 3001 because the demo backend uses 3000
     depends_on:
       - prometheus
       - loki

@@ -1,3 +1,6 @@
+// Quarantined legacy entry point. See src/telemetry.js for consent-controlled initialization.
+throw new Error('Legacy OpenTelemetry modules are disabled; use src/telemetry.js and src/sdk/index.js');
+
 // Browser logs: LoggerProvider -> OTLP/HTTP -> Collector -> Loki.
 // Logs emitted while a span is active automatically carry that span's trace_id/span_id,
 // so in Grafana you can jump from a log line to its trace.

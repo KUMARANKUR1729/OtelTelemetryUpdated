@@ -1,3 +1,6 @@
+// Quarantined legacy entry point. It must not initialize providers outside the consent lifecycle.
+throw new Error('Legacy OpenTelemetry modules are disabled; use src/telemetry.js and src/sdk/index.js');
+
 // OpenTelemetry bootstrap for the browser (production-minded POC).
 // Must be imported BEFORE any app code so instrumentations can patch fetch/XHR early.
 

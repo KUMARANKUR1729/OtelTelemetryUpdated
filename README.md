@@ -60,6 +60,18 @@ instrumentation-document-load 0.64.0 / user-interaction 0.63.0 match the 0.219 l
 Mixing "latest" of everything currently fails to install/build. sdk-trace-web/base are deprecated in favour of
 `@opentelemetry/sdk-trace` (3.x line) - revisit when 3.x is stable for browsers.
 
+## Local security and shutdown limitations
+The Docker services and observability UI are bound to localhost in this development configuration. Grafana
+allows read-only anonymous viewing; production requires authentication and least-privileged users.
+The local OTLP/HTTP receiver is unauthenticated and must not be treated as production ingestion. Production
+requires authenticated HTTPS ingestion (for example, an authenticating TLS reverse proxy or collector endpoint).
+TLS alone does not provide authentication.
+
+Revocation synchronously disables collection and does not call provider `forceFlush()` explicitly. The installed
+OpenTelemetry providers and batch processors may flush queued records as part of `shutdown()`; there is no
+supported public clear/drop queue API in this dependency set. Therefore this POC cannot guarantee that provider
+shutdown drops every buffered record. Requests already transmitted or in flight may not be cancellable.
+
 ## Known limitation found during the POC
 zone.js cannot track native async/await: after the first `await` the active span is lost and new spans become
 separate root traces. Capture the parent context before the await and pass it explicitly (button 4 in src/main.js).
